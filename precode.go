@@ -5,7 +5,11 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
+
+var mxGenerator sync.Mutex
+var mxAmounts sync.Mutex
 
 // Generator генерирует последовательность чисел 1,2,3 и т.д. и
 // отправляет их в канал ch. При этом после записи в канал для каждого числа
@@ -13,20 +17,37 @@ import (
 // сгенерированных чисел.
 func Generator(ctx context.Context, ch chan<- int64, fn func(int64)) {
 	// 1. Функция Generator
-	// ...
+	defer close(ch)
+	curValue := int64(1)
+	for {
+		select {
+		case ch <- curValue:
+			mxGenerator.Lock()
+			fn(curValue)
+			curValue++
+			mxGenerator.Unlock()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // Worker читает число из канала in и пишет его в канал out.
 func Worker(in <-chan int64, out chan<- int64) {
 	// 2. Функция Worker
-	// ...
+	defer close(out)
+	for v := range in {
+		out <- v
+		time.Sleep(1 * time.Millisecond)
+	}
 }
 
 func main() {
 	chIn := make(chan int64)
 
 	// 3. Создание контекста
-	// ...
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
 
 	// для проверки будем считать количество и сумму отправленных чисел
 	var inputSum int64   // сумма сгенерированных чисел
@@ -55,7 +76,19 @@ func main() {
 	var wg sync.WaitGroup
 
 	// 4. Собираем числа из каналов outs
-	// ...
+	for j := 0; j < NumOut; j++ {
+		ch0 := outs[j]
+		wg.Add(1)
+		go func(in <-chan int64, i int64) {
+			defer wg.Done()
+			for v := range in {
+				mxAmounts.Lock()
+				amounts[i]++
+				mxAmounts.Unlock()
+				chOut <- v
+			}
+		}(ch0, int64(j))
+	}
 
 	go func() {
 		// ждём завершения работы всех горутин для outs
@@ -68,7 +101,10 @@ func main() {
 	var sum int64   // сумма чисел результирующего канала
 
 	// 5. Читаем числа из результирующего канала
-	// ...
+	for v := range chOut {
+		sum += v
+		count++
+	}
 
 	fmt.Println("Количество чисел", inputCount, count)
 	fmt.Println("Сумма чисел", inputSum, sum)
